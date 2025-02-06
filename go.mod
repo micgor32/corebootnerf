@@ -1,4 +1,4 @@
-module github.com/linuxboot/corebootnerf
+module github.com/micgor32/corebootnerf
 
 go 1.21
 
