@@ -28,7 +28,7 @@ rootwait
 	fetch         = flag.Bool("fetch", false, "Fetch all the things we need")
 	skipkern      = flag.Bool("skipkern", false, "Don't build the kernel")
 	extra         = flag.String("extra", "", "Comma-separated list of extra packages to include")
-	kernelVersion = "v4.12.7"
+	kernelVersion = "v6.12.12"
 	workingDir    = ""
 	linuxVersion  = "linux-stable"
 	homeDir       = ""
