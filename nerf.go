@@ -25,10 +25,12 @@ var (
 rootwait
 `
 	apt           = flag.Bool("apt", false, "apt-get all the things we need")
+	dnf 		  = flag.Bool("dnf", false, "dng install all the things we need")
 	fetch         = flag.Bool("fetch", false, "Fetch all the things we need")
 	skipkern      = flag.Bool("skipkern", false, "Don't build the kernel")
 	extra         = flag.String("extra", "", "Comma-separated list of extra packages to include")
 	kernelVersion = "v6.12.12"
+	corebootVer	  = "24.1" // TODO: add the possibility to use git version and/or the modified version for LinuxbootSMM
 	workingDir    = ""
 	linuxVersion  = "linux-stable"
 	homeDir       = ""
@@ -103,15 +105,15 @@ func kernelGet() error {
 }
 
 func corebootGet() error {
-	var args = []string{"https://coreboot.org/releases/coreboot-4.9.tar.xz"}
-	fmt.Printf("-------- Getting coreboot via wget %v\n", "https://coreboot.org/releases/coreboot-4.9.tar.xz")
+	var args = []string{"https://coreboot.org/releases/coreboot-" + corebootVer + ".tar.xz"}
+	fmt.Printf("-------- Getting coreboot via wget %v\n", "https://coreboot.org/releases/coreboot-" + corebootVer + ".tar.xz")
 	cmd := exec.Command("wget", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("didn't wget coreboot %v", err)
 		return err
 	}
-	cmd = exec.Command("tar", "xvf", "coreboot-4.9.tar.xz")
+	cmd = exec.Command("tar", "xvf", "coreboot-" + corebootVer + ".tar.xz")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("untar failed %v", err)
@@ -119,7 +121,7 @@ func corebootGet() error {
 	}
 	cmd = exec.Command("make", "-j"+strconv.Itoa(threads), "crossgcc-i386", "iasl")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Dir = "coreboot-4.9"
+	cmd.Dir = "coreboot-" + corebootVer
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("untar failed %v", err)
 		return err
@@ -150,11 +152,11 @@ func buildKernel() error {
 }
 
 func buildCoreboot() error {
-	if err := ioutil.WriteFile("coreboot-4.9/.config", []byte(corebootconfig), 0666); err != nil {
+	if err := ioutil.WriteFile("coreboot-" + corebootVer + "/.config", []byte(corebootconfig), 0666); err != nil {
 		fmt.Printf("writing corebootconfig: %v", err)
 		return err
 	}
-	if err := cp("linux-stable/arch/x86/boot/bzImage", "coreboot-4.9/bzImage"); err != nil {
+	if err := cp("linux-stable/arch/x86/boot/bzImage", "coreboot-" + corebootVer + "/bzImage"); err != nil {
 		fmt.Printf("copying %v to linux-stable/.config: %v", err)
 	}
 
@@ -166,7 +168,7 @@ func buildCoreboot() error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat("coreboot-4.9/build/coreboot.rom"); err != nil {
+	if _, err := os.Stat("coreboot-" + corebootVer + "/build/coreboot.rom"); err != nil {
 		return err
 	}
 	fmt.Printf("bzImage created")
@@ -206,6 +208,29 @@ func cleanup() error {
 	return nil
 }
 
+func dnfinstall() error {
+	missing := []string{}
+	for _, packageName := range packageList {
+		cmd := exec.Command("dnf", "info", packageName)
+		if err := cmd.Run(); err != nil {
+			missing = append(missing, packageName)
+		}
+	}
+
+	if len(missing) == 0 {
+		fmt.Println("No missing dependencies to install")
+		return nil
+	}
+
+	fmt.Printf("Using dng to get %v\n", missing)
+	get := []string{"dnf", "-y", "install"}
+	get = append(get, missing...)
+	cmd := exec.Command("sudo", get...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+	
+}
+
 func aptget() error {
 	missing := []string{}
 	for _, packageName := range packageList {
@@ -240,6 +265,7 @@ func allFunc() error {
 		{f: cleanup, skip: *skipkern || !*fetch, ignore: false, n: "cleanup"},
 		{f: goGet, skip: *skipkern || !*fetch, ignore: false, n: "Get u-root source"},
 		{f: aptget, skip: !*apt, ignore: false, n: "apt get"},
+		{f: dnfinstall, skip !*dnf, ignore: false, n: "dnf"},
 		{f: kernelGet, skip: *skipkern || !*fetch, ignore: false, n: "Git clone the kernel"},
 		{f: corebootGet, skip: *skipkern || !*fetch, ignore: false, n: "Git clone coreboot"},
 		{f: goBuildStatic, skip: *skipkern, ignore: false, n: "Build static initramfs"},
