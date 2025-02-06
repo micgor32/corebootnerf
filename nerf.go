@@ -163,7 +163,7 @@ func buildCoreboot() error {
 	cmd := exec.Command("make", "-j"+strconv.Itoa(threads))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "ARCH=x86_64")
-	cmd.Dir = "coreboot-4.9"
+	cmd.Dir = "coreboot-" + corebootVer
 	err := cmd.Run()
 	if err != nil {
 		return err
@@ -265,7 +265,7 @@ func allFunc() error {
 		{f: cleanup, skip: *skipkern || !*fetch, ignore: false, n: "cleanup"},
 		{f: goGet, skip: *skipkern || !*fetch, ignore: false, n: "Get u-root source"},
 		{f: aptget, skip: !*apt, ignore: false, n: "apt get"},
-		{f: dnfinstall, skip !*dnf, ignore: false, n: "dnf"},
+		{f: dnfinstall, skip: !*dnf, ignore: false, n: "dnf"},
 		{f: kernelGet, skip: *skipkern || !*fetch, ignore: false, n: "Git clone the kernel"},
 		{f: corebootGet, skip: *skipkern || !*fetch, ignore: false, n: "Git clone coreboot"},
 		{f: goBuildStatic, skip: *skipkern, ignore: false, n: "Build static initramfs"},
