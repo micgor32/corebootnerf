@@ -13,41 +13,61 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"github.com/go-ini/ini"
 
 	flag "github.com/spf13/pflag"
 )
-
-const initramfs = "initramfs.linux_amd64.cpio"
 
 var (
 	configTxt = `loglevel=1
 	init=/init
 rootwait
 `
-	apt           = flag.Bool("apt", false, "apt-get all the things we need")
+	deps          = flag.Bool("deps", false, "apt/pacman/dnf all the things we need")
 	fetch         = flag.Bool("fetch", false, "Fetch all the things we need")
-	skipkern      = flag.Bool("skipkern", false, "Don't build the kernel")
+	customkern    = flag.Bool("customkern", false, "Build the kernel separately")
 	extra         = flag.String("extra", "", "Comma-separated list of extra packages to include")
-	kernelVersion = "v4.12.7"
+	kernelVersion = "linux-6.14.y"
+	corebootVer   = "25.03"
 	workingDir    = ""
-	linuxVersion  = "linux-stable"
 	homeDir       = ""
 	threads       = runtime.NumCPU() + 2 // Number of threads to use when calling make.
-	packageList   = []string{
-		"bc",
+	packageListDebian   = []string{ 
+		"bison",
 		"git",
 		"golang",
 		"build-essential",
-		"git-core",
-		"gitk",
-		"git-gui",
-		"iasl",
 		"curl",
-		"python2.7",
-		"libyaml-dev",
-		"liblzma-dev",
-		"uuid-dev",
+		"gnat",
+		"flex",
+		"gnat",
+		"libncurses-dev",
 		"libssl-dev",
+		"zlib1g-dev",
+		"pkgconf",
+	}
+	packageListArch = []string{
+		"base-devel",
+		"curl",
+		"git",
+		"gcc-ada",
+		"ncurses",
+		"zlib",
+	}
+	packageListRedhat = []string{
+		"git",
+		"make",
+		"gcc-gnat",
+		"flex",
+		"bison",
+		"xz",
+		"bzip2",
+		"gcc",
+		"g++",
+		"ncurses-devel",
+		"wget",
+		"zlib-devel",
+		"patch",
 	}
 )
 
@@ -67,51 +87,27 @@ func cp(inputLoc string, outputLoc string) error {
 	return ioutil.WriteFile(outputLoc, fileContent, 0777)
 }
 
-func goGet() error {
-	cmd := exec.Command("go", "get", "github.com/u-root/u-root")
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
-}
-
-func goBuildStatic() error {
-	oFile := filepath.Join(workingDir, "linux-stable", initramfs)
-	args := []string{"run", "github.com/u-root/u-root", "-o", oFile, "-build=bb"}
-	cmd := exec.Command("go", append(args, staticCmdList...)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	cmd = exec.Command("xz", "-f", "--check=crc32", "--lzma2=dict=512KiB", "linux-stable/initramfs.linux_amd64.cpio")
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	fmt.Printf("Created %v\n", oFile)
-	return nil
-}
-
 func kernelGet() error {
-	var args = []string{"clone", "--depth", "1", "-b", kernelVersion, "git://git.kernel.org/pub/scm/linux/kernel/git/stable/" + linuxVersion + ".git"}
+	var args = []string{"clone", "--depth", "1", "-b", kernelVersion, "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"}
 	fmt.Printf("-------- Getting the kernel via git %v\n", args)
 	cmd := exec.Command("git", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("didn't clone kernel %v", err)
-		return err
 	}
 	return nil
 }
 
 func corebootGet() error {
-	var args = []string{"https://coreboot.org/releases/coreboot-4.9.tar.xz"}
-	fmt.Printf("-------- Getting coreboot via wget %v\n", "https://coreboot.org/releases/coreboot-4.9.tar.xz")
+	var args = []string{"https://coreboot.org/releases/coreboot-", corebootVer,".tar.xz"}
+	fmt.Printf("-------- Getting coreboot via wget %v\n", "https://coreboot.org/releases/coreboot-", corebootVer, ".tar.xz")
 	cmd := exec.Command("wget", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("didn't wget coreboot %v", err)
 		return err
 	}
-	cmd = exec.Command("tar", "xvf", "coreboot-4.9.tar.xz")
+	cmd = exec.Command("tar", "xvf", "coreboot-" + corebootVer + ".tar.xz")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("untar failed %v", err)
@@ -119,7 +115,7 @@ func corebootGet() error {
 	}
 	cmd = exec.Command("make", "-j"+strconv.Itoa(threads), "crossgcc-i386", "iasl")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Dir = "coreboot-4.9"
+	cmd.Dir = "coreboot-" + corebootVer
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("untar failed %v", err)
 		return err
@@ -150,26 +146,28 @@ func buildKernel() error {
 }
 
 func buildCoreboot() error {
-	if err := ioutil.WriteFile("coreboot-4.9/.config", []byte(corebootconfig), 0666); err != nil {
+	if err := ioutil.WriteFile("coreboot-" + corebootVer +"/.config", []byte(corebootconfig), 0666); err != nil {
 		fmt.Printf("writing corebootconfig: %v", err)
 		return err
 	}
-	if err := cp("linux-stable/arch/x86/boot/bzImage", "coreboot-4.9/bzImage"); err != nil {
-		fmt.Printf("copying %v to linux-stable/.config: %v", err)
+	if *customkern {
+		if err := cp("linux-stable/arch/x86/boot/bzImage", "coreboot-" + corebootVer + "/payloads/external/LinuxBoot/build/Image"); err != nil {
+			fmt.Printf("copying %v to linux-stable/.config: %v", err) // ??? seems to be misplaced, change later
+		}
 	}
 
 	cmd := exec.Command("make", "-j"+strconv.Itoa(threads))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "ARCH=x86_64")
-	cmd.Dir = "coreboot-4.9"
+	cmd.Dir = "coreboot-" + corebootVer
 	err := cmd.Run()
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat("coreboot-4.9/build/coreboot.rom"); err != nil {
+	if _, err := os.Stat("coreboot-" + corebootVer + "/build/coreboot.rom"); err != nil {
 		return err
 	}
-	fmt.Printf("bzImage created")
+	fmt.Printf("coreboot.rom created")
 	return nil
 }
 
@@ -206,9 +204,54 @@ func cleanup() error {
 	return nil
 }
 
+func pacmaninstall() error {
+	missing := []string{}
+	for _, packageName := range packageListArch {
+		cmd := exec.Command("pacman", "-Ql", packageName)
+		if err := cmd.Run(); err != nil {
+			missing = append(missing, packageName)
+		}
+	}
+
+	if len(missing) == 0 {
+		fmt.Println("No missing dependencies to install\n")
+		return nil
+	}
+
+	fmt.Printf("Using pacman to get %v\n", missing)
+	get := []string{"pacman", "-S", "--noconfirm"}
+	get = append(get, missing...)
+	cmd := exec.Command("sudo", get...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+
+func dnfinstall() error {
+	missing := []string{}
+	for _, packageName := range packageListRedhat {
+		cmd := exec.Command("dnf", "info", packageName)
+		if err := cmd.Run(); err != nil {
+			missing = append(missing, packageName)
+		}
+	}
+
+	if len(missing) == 0 {
+		fmt.Println("No missing dependencies to install")
+		return nil
+	}
+
+	fmt.Printf("Using dnf to get %v\n", missing)
+	get := []string{"dnf", "-y", "install"}
+	get = append(get, missing...)
+	cmd := exec.Command("sudo", get...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 func aptget() error {
 	missing := []string{}
-	for _, packageName := range packageList {
+	for _, packageName := range packageListDebian {
 		cmd := exec.Command("dpkg", "-s", packageName)
 		if err := cmd.Run(); err != nil {
 			missing = append(missing, packageName)
@@ -229,6 +272,34 @@ func aptget() error {
 
 }
 
+func depinstall() error {
+	cfg, err := ini.Load("/etc/os-release")
+    if err != nil {
+        log.Fatal("Fail to read file: %v\n", err)
+    }
+
+    ConfigParams := make(map[string]string)
+    ConfigParams["ID"] = cfg.Section("").Key("ID").String()
+	osID := ConfigParams["ID"]
+
+	switch osID {
+		case "fedora":
+			dnfinstall()
+		case "rhel":
+			dnfinstall()
+		case "debian":
+			aptget()
+		case "ubuntu":
+			aptget()
+		case "arch":
+			pacmaninstall()
+		default:
+			log.Fatal("No matching OS found\n")
+	}
+
+	return nil
+}
+
 func allFunc() error {
 	var cmds = []struct {
 		f      func() error
@@ -237,14 +308,12 @@ func allFunc() error {
 		n      string
 	}{
 		{f: check, skip: false, ignore: false, n: "check environment"},
-		{f: cleanup, skip: *skipkern || !*fetch, ignore: false, n: "cleanup"},
-		{f: goGet, skip: *skipkern || !*fetch, ignore: false, n: "Get u-root source"},
-		{f: aptget, skip: !*apt, ignore: false, n: "apt get"},
-		{f: kernelGet, skip: *skipkern || !*fetch, ignore: false, n: "Git clone the kernel"},
-		{f: corebootGet, skip: *skipkern || !*fetch, ignore: false, n: "Git clone coreboot"},
-		{f: goBuildStatic, skip: *skipkern, ignore: false, n: "Build static initramfs"},
-		{f: buildKernel, skip: *skipkern, ignore: false, n: "build the kernel"},
-		{f: buildCoreboot, skip: *skipkern, ignore: false, n: "build coreboot"},
+		{f: cleanup, skip: !*customkern || !*fetch, ignore: false, n: "cleanup"},
+		{f: depinstall, skip: !*deps, ignore: false, n: "install depenedencies"},
+		{f: kernelGet, skip: !*customkern || !*fetch, ignore: false, n: "Git clone the kernel"},
+		{f: corebootGet, skip: !*fetch, ignore: false, n: "Git clone coreboot"},
+		{f: buildKernel, skip: !*customkern, ignore: false, n: "build the kernel"},
+		{f: buildCoreboot, skip: false, ignore: false, n: "build coreboot"},
 	}
 
 	for _, c := range cmds {
