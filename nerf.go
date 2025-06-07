@@ -6,7 +6,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -14,8 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"github.com/go-ini/ini"
-
-	flag "github.com/spf13/pflag"
+	"flag"
 )
 
 var (
@@ -32,7 +30,7 @@ rootwait
 	workingDir    = ""
 	homeDir       = ""
 	threads       = runtime.NumCPU() + 2 // Number of threads to use when calling make.
-	packageListDebian   = []string{ 
+	packageListDebian = []string{ 
 		"bison",
 		"git",
 		"golang",
@@ -52,6 +50,7 @@ rootwait
 		"git",
 		"gcc-ada",
 		"ncurses",
+		"wget",
 		"zlib",
 	}
 	packageListRedhat = []string{
@@ -80,11 +79,11 @@ func cp(inputLoc string, outputLoc string) error {
 	if _, err := os.Stat(inputLoc); err != nil {
 		return err
 	}
-	fileContent, err := ioutil.ReadFile(inputLoc)
+	fileContent, err := os.ReadFile(inputLoc)
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(outputLoc, fileContent, 0777)
+	return os.WriteFile(outputLoc, fileContent, 0777)
 }
 
 func kernelGet() error {
@@ -99,8 +98,10 @@ func kernelGet() error {
 }
 
 func corebootGet() error {
-	var args = []string{"https://coreboot.org/releases/coreboot-", corebootVer,".tar.xz"}
-	fmt.Printf("-------- Getting coreboot via wget %v\n", "https://coreboot.org/releases/coreboot-", corebootVer, ".tar.xz")
+	baseUrl := "https://coreboot.org/releases/coreboot-"
+	fullUrl := baseUrl + corebootVer + ".tar.xz"
+	var args = []string{fullUrl}
+	fmt.Printf("-------- Getting coreboot via wget %v\n", fullUrl)
 	cmd := exec.Command("wget", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -124,7 +125,7 @@ func corebootGet() error {
 }
 
 func buildKernel() error {
-	if err := ioutil.WriteFile("linux-stable/.config", []byte(linuxconfig), 0666); err != nil {
+	if err := os.WriteFile("linux-stable/.config", []byte(linuxconfig), 0666); err != nil {
 		fmt.Printf("writing linux-stable/.config: %v", err)
 		return err
 	}
@@ -146,13 +147,13 @@ func buildKernel() error {
 }
 
 func buildCoreboot() error {
-	if err := ioutil.WriteFile("coreboot-" + corebootVer +"/.config", []byte(corebootconfig), 0666); err != nil {
+	if err := os.WriteFile("coreboot-" + corebootVer +"/.config", []byte(corebootconfig), 0666); err != nil {
 		fmt.Printf("writing corebootconfig: %v", err)
 		return err
 	}
 	if *customkern {
 		if err := cp("linux-stable/arch/x86/boot/bzImage", "coreboot-" + corebootVer + "/payloads/external/LinuxBoot/build/Image"); err != nil {
-			fmt.Printf("copying %v to linux-stable/.config: %v", err) // ??? seems to be misplaced, change later
+			fmt.Printf("copying custom kernel: %v", err)
 		}
 	}
 
@@ -168,15 +169,6 @@ func buildCoreboot() error {
 		return err
 	}
 	fmt.Printf("coreboot.rom created")
-	return nil
-}
-
-func run(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%v %v: %v", name, args, err)
-	}
 	return nil
 }
 
@@ -214,7 +206,7 @@ func pacmaninstall() error {
 	}
 
 	if len(missing) == 0 {
-		fmt.Println("No missing dependencies to install\n")
+		fmt.Println("No missing dependencies to install")
 		return nil
 	}
 
@@ -313,7 +305,7 @@ func allFunc() error {
 		{f: kernelGet, skip: !*customkern || !*fetch, ignore: false, n: "Git clone the kernel"},
 		{f: corebootGet, skip: !*fetch, ignore: false, n: "Git clone coreboot"},
 		{f: buildKernel, skip: !*customkern, ignore: false, n: "build the kernel"},
-		{f: buildCoreboot, skip: false, ignore: false, n: "build coreboot"},
+		{f: buildCoreboot, skip: *deps, ignore: false, n: "build coreboot"},
 	}
 
 	for _, c := range cmds {
