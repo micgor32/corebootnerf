@@ -5,7 +5,6 @@
 package main
 
 import (
-	//"os"
 	_ "embed"
 )
 
@@ -13,18 +12,3 @@ import (
 var linuxconfig []byte
 //go:embed COREBOOTCONFIG 
 var corebootconfig []byte
-
-// func genConfig() error {
-// 	var err error
-// 	linuxconfig, err = os.ReadFile("CONFIG")
-// 	if err != nil {
-// 		return err
-// 	}
-	
-// 	corebootconfig, err = os.ReadFile("COREBOOTCONFIG")
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	return nil
-// }

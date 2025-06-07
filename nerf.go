@@ -25,7 +25,7 @@ rootwait
 	fetch         = flag.Bool("fetch", false, "Fetch all the things we need")
 	customkern    = flag.Bool("customkern", false, "Build the kernel separately")
 	extra         = flag.String("extra", "", "Comma-separated list of extra packages to include")
-	kernelVersion = "linux-6.14.y"
+	kernelVersion = "linux-6.15.y"
 	corebootVer   = "25.03"
 	workingDir    = ""
 	homeDir       = ""
