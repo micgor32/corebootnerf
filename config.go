@@ -8,7 +8,7 @@ import (
 	_ "embed"
 )
 
-//go:embed CONFIG
-var linuxconfig []byte
-//go:embed COREBOOTCONFIG 
+//go:embed COREBOOTCONFIG
 var corebootconfig []byte
+//go:embed COREBOOTCUSTOM
+var corebootcustom []byte

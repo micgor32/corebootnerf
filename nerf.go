@@ -9,11 +9,11 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"github.com/go-ini/ini"
 	"flag"
+	"errors"
 )
 
 var (
@@ -23,9 +23,9 @@ rootwait
 `
 	deps          = flag.Bool("deps", false, "apt/pacman/dnf all the things we need")
 	fetch         = flag.Bool("fetch", false, "Fetch all the things we need")
-	customkern    = flag.Bool("customkern", false, "Build the kernel separately")
+	customkern    = flag.String("customkern", "", "Path to the custom kernel")
+	initramfs     = flag.String("initramfs", "", "Path to the custom initramfs")
 	extra         = flag.String("extra", "", "Comma-separated list of extra packages to include")
-	kernelVersion = "linux-6.15.y"
 	corebootVer   = "25.03"
 	workingDir    = ""
 	homeDir       = ""
@@ -86,17 +86,6 @@ func cp(inputLoc string, outputLoc string) error {
 	return os.WriteFile(outputLoc, fileContent, 0777)
 }
 
-func kernelGet() error {
-	var args = []string{"clone", "--depth", "1", "-b", kernelVersion, "git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"}
-	fmt.Printf("-------- Getting the kernel via git %v\n", args)
-	cmd := exec.Command("git", args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("didn't clone kernel %v", err)
-	}
-	return nil
-}
-
 func corebootGet() error {
 	baseUrl := "https://coreboot.org/releases/coreboot-"
 	fullUrl := baseUrl + corebootVer + ".tar.xz"
@@ -124,36 +113,35 @@ func corebootGet() error {
 	return nil
 }
 
-func buildKernel() error {
-	if err := os.WriteFile("linux-stable/.config", []byte(linuxconfig), 0666); err != nil {
-		fmt.Printf("writing linux-stable/.config: %v", err)
+func customKern() error {
+	if *initramfs == "" {
+		return errors.New("initramfs not provided")
+	}
+
+	custom := fmt.Appendf(
+		corebootcustom,
+		"\nCONFIG_PAYLOAD_FILE=\"%s\"\nCONFIG_LINUX_INITRD=\"%s\"",
+		*customkern,
+		*initramfs,
+	)
+
+	if err := os.WriteFile("coreboot-" + corebootVer +"/.config", custom, 0666); err != nil {
+		fmt.Printf("writing corebootconfig: %v", err)
 		return err
 	}
 
-	cmd := exec.Command("make", "--directory", "linux-stable", "-j"+strconv.Itoa(threads))
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	// TODO: this is OK for now. Later we'll need to do something
-	// with a map and GOARCH.
-	cmd.Env = append(os.Environ(), "ARCH=x86_64")
-	err := cmd.Run()
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join("linux-stable", "/arch/x86/boot/bzImage")); err != nil {
-		return err
-	}
-	fmt.Printf("bzImage created")
 	return nil
 }
 
 func buildCoreboot() error {
-	if err := os.WriteFile("coreboot-" + corebootVer +"/.config", []byte(corebootconfig), 0666); err != nil {
-		fmt.Printf("writing corebootconfig: %v", err)
-		return err
-	}
-	if *customkern {
-		if err := cp("linux-stable/arch/x86/boot/bzImage", "coreboot-" + corebootVer + "/payloads/external/LinuxBoot/build/Image"); err != nil {
-			fmt.Printf("copying custom kernel: %v", err)
+	if *customkern != "" {
+		if err := customKern(); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile("coreboot-" + corebootVer +"/.config", []byte(corebootconfig), 0666); err != nil {
+			fmt.Printf("writing corebootconfig: %v", err)
+			return err
 		}
 	}
 
@@ -175,23 +163,6 @@ func buildCoreboot() error {
 func check() error {
 	if os.Getenv("GOPATH") == "" {
 		return fmt.Errorf("You have to set GOPATH.")
-	}
-	return nil
-}
-
-func cleanup() error {
-	filesToRemove := [...]string{"linux-stable", "vboot_reference", "linux-firmware"}
-	fmt.Printf("-------- Removing problematic files %v\n", filesToRemove)
-	for _, file := range filesToRemove {
-		if _, err := os.Stat(file); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-		}
-		err := os.RemoveAll(file)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -300,11 +271,8 @@ func allFunc() error {
 		n      string
 	}{
 		{f: check, skip: false, ignore: false, n: "check environment"},
-		{f: cleanup, skip: !*customkern || !*fetch, ignore: false, n: "cleanup"},
 		{f: depinstall, skip: !*deps, ignore: false, n: "install depenedencies"},
-		{f: kernelGet, skip: !*customkern || !*fetch, ignore: false, n: "Git clone the kernel"},
 		{f: corebootGet, skip: !*fetch, ignore: false, n: "Git clone coreboot"},
-		{f: buildKernel, skip: !*customkern, ignore: false, n: "build the kernel"},
 		{f: buildCoreboot, skip: *deps, ignore: false, n: "build coreboot"},
 	}
 
@@ -330,7 +298,7 @@ func allFunc() error {
 
 func main() {
 	flag.Parse()
-	log.Printf("Using kernel %v\n", kernelVersion)
+	log.Printf("Building coreboot verstion %v\n", corebootVer)
 	if err := allFunc(); err != nil {
 		log.Fatalf("fail error is : %v", err)
 	}
